@@ -5,6 +5,7 @@ import {
   UseQueryResult,
 } from 'react-query';
 import axios, { AxiosError } from 'axios';
+
 import { API_BASE_URL, CACHE_STALE_TIME } from '../utils/consts';
 
 const apiKey = process.env.REACT_APP_API_KEY;
@@ -25,6 +26,10 @@ export type LocationResponseData = {
   data: LocationItem[];
 };
 
+const getSearchQueryKey = (query: string): string => {
+  return `search-${query.toLowerCase()}`;
+};
+
 const fetchCities: QueryFunction<LocationResponseData, [string, string]> = (
   param: QueryFunctionContext
 ): Promise<LocationResponseData> => {
@@ -41,7 +46,7 @@ export const useLocationData = ({
 }: UseLocationDataOptions): UseQueryResult<LocationItem[], AxiosError> => {
   const enabled = searchTerm !== '' && searchTerm.length > 2 && isFocused;
 
-  return useQuery(['search', searchTerm], fetchCities, {
+  return useQuery([getSearchQueryKey(searchTerm), searchTerm], fetchCities, {
     onSuccess: onSuccess,
     onError: onError,
     select: (data: LocationResponseData) => data.data,

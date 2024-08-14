@@ -5,12 +5,13 @@ import {
   UseQueryResult,
 } from 'react-query';
 import axios, { AxiosError } from 'axios';
+
 import { API_BASE_URL, CACHE_STALE_TIME } from '../utils/consts';
 
 const apiKey = process.env.REACT_APP_API_KEY;
 
 export type UseWeatherDataOptions = {
-  onSuccess: (data: WeatherData) => void;
+  onSuccess: (cityName: string) => void;
   onError: (error: AxiosError) => void;
   cityName: string;
   current?: string;
@@ -28,11 +29,19 @@ export type WeatherData = {
   };
   location: {
     name: string;
+    country: string;
+    localtime: string;
+    lon: number;
+    lat: number;
   };
 };
 
 export type WeatherResponseData = {
   data: WeatherData;
+};
+
+export const getWeatherQueryKey = (cityName: string): string => {
+  return `get-weather-${cityName.toLowerCase()}`;
 };
 
 const fetchWeather: QueryFunction<WeatherResponseData, [string, string]> = (
@@ -41,7 +50,9 @@ const fetchWeather: QueryFunction<WeatherResponseData, [string, string]> = (
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, cityName] = param.queryKey;
 
-  return axios.get(`${API_BASE_URL}/current.json?key=${apiKey}&q=${cityName}`);
+  return axios.get(`${API_BASE_URL}/current.json?key=${apiKey}&q=${cityName}`, {
+    timeout: 4000,
+  });
 };
 
 export const useWeatherData = ({
@@ -50,8 +61,8 @@ export const useWeatherData = ({
   cityName,
   current,
 }: UseWeatherDataOptions): UseQueryResult<WeatherData, AxiosError> => {
-  return useQuery(['get-weather', cityName], fetchWeather, {
-    onSuccess,
+  return useQuery([getWeatherQueryKey(cityName), cityName], fetchWeather, {
+    onSuccess: () => onSuccess(cityName),
     onError,
     select: (data: WeatherResponseData) => data.data,
     enabled: !!cityName && cityName !== current,

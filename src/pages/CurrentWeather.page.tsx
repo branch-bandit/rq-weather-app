@@ -1,65 +1,71 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { QueryClient } from 'react-query';
 import { AxiosError } from 'axios';
 
-import { WeatherData } from '../hooks/useWeatherData';
 import { Search } from '../components/Search';
-import { WeatherChartWithQuery } from '../components/chart/WeatherChartWithQuery';
-import { CACHE_STALE_TIME } from '../utils/consts';
-import { WeatherChart } from '../components/chart/WeatherChart';
 import { CachedQueryButtons } from '../components/CachedQueryButtons';
 import { ErrorMessage } from '../components/Error';
+import { WeatherData } from '../hooks/useWeatherData';
+import { ChartContainer } from '../components/chart/ChartContainer';
 
-export type CacheItem = {
-  timestamp: number;
-  name: string;
-  data: WeatherData;
-};
+// To avoid having this state in two places (compoent state and query cache)
+// We make sure that there are only 4 cached weather queries corresponding to the buttons
+const handleCachedQueries = (queryClient: QueryClient, amount: number) => {
+  const cachedQueryKeys: string[] = [];
+  let cachedCityNames: string[] = [];
 
-const getCachedItem = (
-  query: string,
-  cache: CacheItem[]
-): CacheItem | undefined => {
-  return cache.find((item) => query === item.name);
-};
+  const freshQueries = queryClient.getQueriesData({
+    stale: false,
+  });
 
-const getCachedItemIndex = (query: string, cache: CacheItem[]): number => {
-  return cache.findIndex((item) => query === item.name);
-};
+  freshQueries.forEach(([query, data]) => {
+    const cached = data as { status: number; data: WeatherData };
+    const [queryKey] = query as string[];
 
-export const CurrentWeatherPage = (): JSX.Element => {
-  const [query, setQuery] = useState<string>('');
-  const [cache, setCache] = useState<CacheItem[]>([]);
-  const [shouldUseCache, setShouldUseCache] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onSuccess = (data: WeatherData): void => {
-    const cachedItemIndex = getCachedItemIndex(data.location.name, cache);
-
-    const newItem = {
-      timestamp: new Date().getTime(),
-      name: data?.location?.name,
-      data,
-    };
-
-    if (cachedItemIndex !== -1) {
-      const newCache = [...cache];
-
-      newCache[cachedItemIndex] = newItem;
-      setCache(newCache);
-
+    if (!queryKey.includes('get-weather')) {
       return;
     }
 
-    const cacheNewestToOldest = [...cache].sort(
-      (a, b) => b.timestamp - a.timestamp
+    const isDuplicate = cachedCityNames.some(
+      (item) => item.toLowerCase() === cached.data.location.name.toLowerCase()
     );
 
-    const newCache = [newItem, ...cacheNewestToOldest].slice(0, 4);
+    if (cached.status === 200 && !isDuplicate) {
+      cachedQueryKeys.unshift(queryKey);
+      cachedCityNames.unshift(cached.data.location.name);
+      cachedCityNames = cachedCityNames.slice(0, amount);
+    }
+  });
 
-    setCache(newCache);
+  const keysToDelete = cachedQueryKeys.slice(amount);
+
+  keysToDelete.forEach((queryKey: string) => {
+    queryClient.removeQueries({ queryKey: [queryKey] });
+  });
+
+  return cachedCityNames;
+};
+
+export const CurrentWeatherPage = ({
+  queryClient,
+}: {
+  queryClient: QueryClient;
+}): JSX.Element => {
+  const [query, setQuery] = useState<string>('');
+  const [current, setCurrent] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+
+  const cachedCityNames = useMemo(
+    () => handleCachedQueries(queryClient, 4),
+    [current]
+  );
+
+  const handleSearch = (value: string): void => {
+    setError(null);
+    setQuery(value);
   };
 
-  const onError = (error: AxiosError): void => {
+  const handleError = (error: AxiosError): void => {
     if (error.response?.status === 400) {
       setError(
         'Your search returned no results. Try again with a valid query.'
@@ -69,48 +75,20 @@ export const CurrentWeatherPage = (): JSX.Element => {
     }
   };
 
-  const setQueryWithCache = (value: string) => {
-    setError(null);
-
-    const cachedItem = getCachedItem(value, cache);
-
-    if (!cachedItem) {
-      setShouldUseCache(false);
-      setQuery(value);
-      return;
-    }
-
-    const currentTime = new Date().getTime();
-    const itemIsValid = currentTime - cachedItem.timestamp < CACHE_STALE_TIME;
-
-    if (!itemIsValid) {
-      setShouldUseCache(false);
-      setQuery(value);
-      return;
-    }
-
-    setShouldUseCache(true);
-    setQuery(value);
-  };
-
-  const cachedItem = getCachedItem(query, cache);
-
   return (
-    <div>
-      <h1 className="text-2xl my-3 font-bold text-indigo-400 text-center">
+    <div className="shadow-inner shadow-xl h-screen">
+      <h1 className="text-2xl md:text-3xl lg:text-4xl pt-8 font-bold text-indigo-400 text-center pb-4">
         Find weather data for a city
       </h1>
-      <Search onButtonClick={setQueryWithCache} />
-      <CachedQueryButtons cache={cache} onItemClick={setQueryWithCache} />
-      {error && <ErrorMessage error={error} onClick={() => setError(null)} />}
-      {!error && shouldUseCache && cachedItem ? (
-        <WeatherChart data={cachedItem.data} />
-      ) : (
-        <WeatherChartWithQuery
-          onSuccess={onSuccess}
-          onError={onError}
+      <Search onButtonClick={handleSearch} />
+      <CachedQueryButtons cache={cachedCityNames} onItemClick={handleSearch} />
+      {error && <ErrorMessage error={error} onClick={() => handleSearch('')} />}
+      {!error && (
+        <ChartContainer
+          onSuccess={setCurrent}
+          onError={handleError}
           query={query}
-          current={cachedItem?.data?.location.name}
+          current={current}
         />
       )}
     </div>
